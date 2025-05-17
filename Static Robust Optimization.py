@@ -6,9 +6,9 @@ import numpy as np
 from  datetime import datetime
 from gurobipy import *
 
-def static_robust_optimization1(df_input):   
+def static_robust_optimization(df_input):   
     # Gurobi モデル
-    model = Model()
+    model = model()
     
     # 決定変数の定義
     q = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="q")                 # 期𝑡の発注量
@@ -42,7 +42,7 @@ def static_robust_optimization1(df_input):
     
     # 制約条件
     for t in range(T):
-        model.addConstr(y[t] >= h * quicksum(q[s] - d[s]) for s in　Upsilon ) 
+        model.addConstr(y[t] >= h * quicksum(q[s] - d[s]) for s in Upsilon ) 
         model.addConstr(I[t] <= M * delta[t])
         model.addConstr(o[t] <= M * (1 - delta[t]))
         i_t = df_input["day_index"].iloc[t] 
@@ -114,7 +114,6 @@ def plot_order_quantity(df_results):
     plt.savefig(save_path, dpi=300)
     plt.show()
     
-  
 def export_results_to_csv(df_results):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     filename = f'optimization_result_{timestamp}.csv'
@@ -123,7 +122,6 @@ def export_results_to_csv(df_results):
     # CSV 出力
     df_results.to_csv(save_path, index=False)
     print(f"結果を保存しました: {save_path}")
-
 
 read_path = "C:\\Users\mina1\.spyder-py3\master's thesis\dataset\demand_data_2025-04-22_1416.csv" 
 df_input = pd.read_csv(read_path) 
@@ -134,7 +132,7 @@ df_input["day_index"] = df_input["date"].dt.weekday
 # training_data/test_data にもこの列を継承
 training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 3)].copy() 
-delivery_schedule = static_robust_optimization1(training_data) 
-df_results = static_robust_optimization2(test_data, delivery_schedule) 
+delivery_schedule = static_robust_optimization(training_data) 
+# df_results = static_robust_optimization2(test_data, delivery_schedule) 
 plot_order_quantity(df_results)  
 export_results_to_csv(df_results) 
