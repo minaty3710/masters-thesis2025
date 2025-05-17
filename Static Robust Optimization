@@ -65,12 +65,7 @@ def static_robust_optimization1(df_input):
     for i in range(W):
         print(f"s*[{i}] = {s[i].X}") 
         
-    delivery_schedule = [int(round(s[i].X)) for i in range(W)] 
-    
-    return delivery_schedule    
-
-def static_robust_optimization2(df_input, delivery_schedule):
-
+    delivery_schedule = [int(round(s[i].X)) for i in range(W)] return delivery_schedule    
     
     # 結果の出力
     x_values = [x[t].X for t in range(T)] 
