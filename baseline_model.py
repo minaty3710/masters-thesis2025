@@ -4,22 +4,17 @@ import os
 import numpy as np
 
 from  datetime import datetime
-from gurobipy import *
+from gurobipy import Model, GRB, quicksum
+
 
 def static_robust_optimization(df_input):   
     # Gurobi モデル
-    model = model()
-    
-    # 決定変数の定義
-    q = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="q")                 # 期𝑡の発注量
-    y = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="y")                 # 期𝑡の在庫コスト（欠品コスト）  
-    delta = model.addVars(T, vtype=GRB.BINARY, name="delta")                   # 配送有無（1のとき配送を実施）
-    sigma = model.addVars(T, vtype=GRB.BINARY, name="sigma")                   # 各曜日の配送有無（1の曜日は配送可能）
+    model = Model()
     
     #パラメータ設定
-    T = len(demand_list)                                                       # 全期間
-    Upsilon = {t: list(range(t)) for t in range(T)}                            # 𝑡−1期までの集合
     D = df_input['demand'].tolist()                                            # 期𝑡の需要量 
+    T = len(D)                                                          # 全期間
+    Upsilon = {t: list(range(t)) for t in range(T)}                            # 𝑡−1期までの集合
     d_mean = np.mean(D)                                                        # 期𝑡の需要量の平均
     Imax = 1500                                                                # 店舗の在庫上限
     Qmax = 500                                                                 # 配送容量上限
@@ -28,9 +23,15 @@ def static_robust_optimization(df_input):
     b = 10                                                                     # 欠品単価
     W = 7                                                                      # １週間の日数
     
+    # 決定変数の定義
+    q = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="q")                 # 期𝑡の発注量
+    y = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="y")                 # 期𝑡の在庫コスト（欠品コスト）  
+    delta = model.addVars(T, vtype=GRB.BINARY, name="delta")                   # 配送有無（1のとき配送を実施）
+    sigma = model.addVars(T, vtype=GRB.BINARY, name="sigma")                   # 各曜日の配送有無（1の曜日は配送可能）
+    
     """
     #補助変数の定義
-    e = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="d") 
+    e = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="e") 
     d = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="d") 
     z = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
     v = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="v") 
@@ -42,57 +43,50 @@ def static_robust_optimization(df_input):
     
     # 制約条件
     for t in range(T):
-        model.addConstr(y[t] >= h * quicksum(q[s] - d[s]) for s in Upsilon ) 
-        model.addConstr(I[t] <= M * delta[t])
-        model.addConstr(o[t] <= M * (1 - delta[t]))
+        model.addConstr(y[t] >= h * quicksum(q[s] - D[s] for s in range(t+1)))
+        model.addConstr(y[t] >= b * quicksum(D[s] - q[s] for s in range(t+1)))
+        model.addConstr(quicksum(q[s] - D[s] for s in range(t+1)) <= Imax)
+        model.addConstr(q[t] <= Qmax * delta[t])    
         i_t = df_input["day_index"].iloc[t] 
-        model.addConstr(y[t] == s[i_t]) 
-        model.addConstr(x[t] <= C * y[t])     # 配送容量制約
+        model.addConstr(delta[t] == sigma[i_t]) 
         
     # 目的関数
-    model.setObjective(quicksum(pi * y[t] + h * I[t] + b * o[t] for t in range(T)), GRB.MINIMIZE) 
+    model.setObjective(quicksum(y[t] + pi * delta[t] for t in range(T)), GRB.MINIMIZE) 
     model.optimize() 
     
     # 結果の出力
-    x_values = [x[t].X for t in range(T)] 
-    I_values = [I[t].X for t in range(T)] 
-    o_values = [o[t].X for t in range(T)] 
+    q_values = [q[t].X for t in range(T)] 
     y_values = [y[t].X for t in range(T)] 
-    delivery_costs = [pi * y[t].X for t in range(T)] 
-    storage_costs = [h * I[t].X for t in range(T)] 
-    shortage_costs = [b * o[t].X for t in range(T)] 
+    delta_values = [delta[t].X for t in range(T)] 
+    sigma_values = [sigma[df_input["day_index"].iloc[t]].X for t in range(T)] 
+    inventory = [max(0, sum(q[s].X - D[s] for s in range(t+1))) for t in range(T)]
+    out_of_stock = [max(0, sum(D[s] - q[s].X for s in range(t+1))) for t in range(T)]
+    delivery_costs = [pi * delta[t].X for t in range(T)] 
+    inventory_costs = [h * inventory[t] for t in range(T)] 
+    out_of_stock_costs = [b * out_of_stock[t] for t in range(T)] 
     
+    """"
     for i in range(W):
-        print(f"s*[{i}] = {s[i].X}") 
-        
-    delivery_schedule = [int(round(s[i].X)) for i in range(W)] return delivery_schedule    
-    
-    # 結果の出力
-    x_values = [x[t].X for t in range(T)] 
-    I_values = [I[t].X for t in range(T)] 
-    o_values = [o[t].X for t in range(T)] 
-    y_values = [y[t].X for t in range(T)] 
-    delivery_costs = [pi * y[t].X for t in range(T)] 
-    storage_costs = [h * I[t].X for t in range(T)] 
-    shortage_costs = [b * o[t].X for t in range(T)] 
-    
-    # s_i をprintで出力
-    for i in range(W):
-        print(f"s*[{i}] = {delivery_schedule[i]}")
-    
+        print(f"sigma*[{i}] = {sigma[i].X}") 
+    """
     # 結果をデータフレームとして格納
+    date_list = df_input['date'].tolist()
+    weekday_list = df_input['date'].dt.strftime('%a').tolist()       
     df_results = pd.DataFrame({
-        'Date': date_list,  # 日付のカラム
-        'Demand': demand_list,
-        'Order Quantity': x_values,
-        'Inventory': I_values,
-        'Shortage': o_values,
-        'Delivery (y)': y_values,
+        'Date': date_list,  
+        'week_day': weekday_list,
+        'Demand': D,
+        'Order Quantity': q_values,
+        'y_Cost' : y_values,
+        'Inventory': inventory,
+        'Shortage': out_of_stock,
+        'delta': delta_values,
+        'sigma' : sigma_values,
         'Delivery Cost': delivery_costs,
-        'Storage Cost': storage_costs,
-        'Shortage Cost': shortage_costs,     
+        'Inventory Cost': inventory_costs,
+        'Shortage Cost': out_of_stock_costs,
     })
-    
+
     return df_results 
 
 def plot_order_quantity(df_results):
@@ -132,7 +126,7 @@ df_input["day_index"] = df_input["date"].dt.weekday
 # training_data/test_data にもこの列を継承
 training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 3)].copy() 
-delivery_schedule = static_robust_optimization(training_data) 
+df_results = static_robust_optimization(training_data) 
 # df_results = static_robust_optimization2(test_data, delivery_schedule) 
-plot_order_quantity(df_results)  
-export_results_to_csv(df_results) 
+plot_order_quantity(df_results)
+export_results_to_csv(df_results)
