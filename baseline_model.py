@@ -31,13 +31,13 @@ def baseline_model(df_input):
     
     """
     #補助変数の定義
-    e = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="e") 
-    d = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="d") 
-    z = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
-    v = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="v") 
-    w = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="w") 
+    e = model.addVars(T, T, lb=0, vtype=GRB.CONTINUOUS, lb=0, name="e") 
+    d = model.addVars(T, T, lb=0, vtype=GRB.CONTINUOUS, lb=0, name="d") 
+    z = model.addVars(T, T, lb=0, vtype=GRB.CONTINUOUS, lb=0, name="z") 
+    v = model.addVars(T, T, lb=0, vtype=GRB.CONTINUOUS, lb=0, name="v") 
+    w = model.addVars(T, T, lb=0, vtype=GRB.CONTINUOUS, lb=0, name="w") 
     """
-        
+    
     model.update() 
     model.setParam('TimeLimit', 60)  # 60秒でタイムリミット
     
@@ -49,7 +49,7 @@ def baseline_model(df_input):
         model.addConstr(q[t] <= Qmax * delta[t])    
         i_t = df_input["day_index"].iloc[t] 
         model.addConstr(delta[t] == sigma[i_t]) 
-        
+
     # 目的関数
     model.setObjective(quicksum(y[t] + pi * delta[t] for t in range(T)), GRB.MINIMIZE) 
     model.optimize() 

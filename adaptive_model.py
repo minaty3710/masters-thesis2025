@@ -29,26 +29,37 @@ def adaptive_model(df_input):
     delta = model.addVars(T, vtype=GRB.BINARY, name="delta")                   # 配送有無（1のとき配送を実施）
     sigma = model.addVars(T, vtype=GRB.BINARY, name="sigma")                   # 各曜日の配送有無（1の曜日は配送可能）
     
-    """
     #補助変数の定義
-    e = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="e") 
-    d = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="d") 
     z = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
     v = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="v") 
     w = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="w") 
-    """
         
     model.update() 
     model.setParam('TimeLimit', 60)  # 60秒でタイムリミット
     
     # 制約条件
     for t in range(T):
-        model.addConstr(y[t] >= h * quicksum(q[s] - D[s] for s in range(t+1)))
-        model.addConstr(y[t] >= b * quicksum(D[s] - q[s] for s in range(t+1)))
-        model.addConstr(quicksum(q[s] - D[s] for s in range(t+1)) <= Imax)
-        model.addConstr(q[t] <= Qmax * delta[t])    
+        model.addConstr(y[t] >= h * (quicksum(z[s, 0] for s in range(t+1)) - quicksum(D[u] * w[t, u] for u in Upsilon[t])))
+        model.addConstr(y[t] >= b * (quicksum(D[u] * w[t, u] for u in Upsilon[t])) - quicksum(z[s, 0] for s in range(t+1)))
+        model.addConstr(quicksum(z[t, 0] for _ in range(t+1)) - quicksum(D[u] * w[t, u] for u in Upsilon[t]) <= Imax)
+        model.addConstr(z[t, 0] + quicksum(D[u] * v[t, u] for u in Upsilon[t]) >= 0)
+        model.addConstr(z[t, 0] + quicksum(D[u] * v[t, u] for u in Upsilon[t]) <= Qmax * delta[t])
         i_t = df_input["day_index"].iloc[t] 
-        model.addConstr(delta[t] == sigma[i_t]) 
+        model.addConstr(delta[t] == sigma[i_t])
+        for t in range(T):
+            if t == 0:  
+                model.addConstr(q[t] == z[t, 0])
+            else:  
+                model.addConstr(q[t] == z[t, 0] + quicksum(z[t, u] * D[u] for u in Upsilon[t])) 
+              
+        for u in Upsilon[t]:
+            if t == 0:  
+                model.addConstr(v[t, u] == 0)
+            else:
+                model.addConstr(v[t, u] == z[t, u])
+
+        for u in Upsilon[t]:
+            model.addConstr(w[t, u] == quicksum((1 if s == u else 0) - v[s, u] for s in range(t + 1)))
         
     # 目的関数
     model.setObjective(quicksum(y[t] + pi * delta[t] for t in range(T)), GRB.MINIMIZE) 
@@ -64,6 +75,9 @@ def adaptive_model(df_input):
     delivery_costs = [pi * delta[t].X for t in range(T)] 
     inventory_costs = [h * inventory[t] for t in range(T)] 
     out_of_stock_costs = [b * out_of_stock[t] for t in range(T)] 
+    v_values = [[v[t, u].X for u in Upsilon[t]] for t in range(T)]
+    w_values = [[v[t, u].X for u in Upsilon[t]] for t in range(T)]  
+    z_values = [[z[t, u].X for u in Upsilon[t]] for t in range(T)] 
     
     """"
     for i in range(W):
@@ -85,6 +99,9 @@ def adaptive_model(df_input):
         'Delivery Cost': delivery_costs,
         'Inventory Cost': inventory_costs,
         'Shortage Cost': out_of_stock_costs,
+        'v_values': [str(v_values[t]) for t in range(T)],  
+        'w_values': [str(w_values[t]) for t in range(T)],
+        'z_values': [str(z_values[t]) for t in range(T)],
     })
 
     return df_results 
@@ -127,5 +144,6 @@ df_input["day_index"] = df_input["date"].dt.weekday
 training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 3)].copy() 
 df_results = adaptive_model(training_data)
+
 plot_order_quantity(df_results)
 export_results_to_csv(df_results)
