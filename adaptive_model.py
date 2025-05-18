@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 import os
 import numpy as np
 
-from  datetime import datetime
+from datetime import datetime
 from gurobipy import Model, GRB, quicksum
 
 
-def baseline_model(df_input):   
+def adaptive_model(df_input):   
     # Gurobi モデル
     model = Model()
     
@@ -126,6 +126,6 @@ df_input["day_index"] = df_input["date"].dt.weekday
 # training_data/test_data にもこの列を継承
 training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 3)].copy() 
-df_results = baseline_model(training_data)  
+df_results = adaptive_model(training_data)
 plot_order_quantity(df_results)
 export_results_to_csv(df_results)
