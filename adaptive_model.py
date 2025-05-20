@@ -41,17 +41,19 @@ def adaptive_model(df_input):
     for t in range(T):
         model.addConstr(y[t] >= h * (quicksum(z[s, 0] for s in range(t+1)) - quicksum(D[u] * w[t, u] for u in Upsilon[t])))
         model.addConstr(y[t] >= b * (quicksum(D[u] * w[t, u] for u in Upsilon[t])) - quicksum(z[s, 0] for s in range(t+1)))
-        model.addConstr(quicksum(z[t, 0] for _ in range(t+1)) - quicksum(D[u] * w[t, u] for u in Upsilon[t]) <= Imax)
+        model.addConstr(quicksum(z[s, 0] for s in range(t+1)) - quicksum(D[u] * w[t, u] for u in Upsilon[t]) <= Imax)
         model.addConstr(z[t, 0] + quicksum(D[u] * v[t, u] for u in Upsilon[t]) >= 0)
         model.addConstr(z[t, 0] + quicksum(D[u] * v[t, u] for u in Upsilon[t]) <= Qmax * delta[t])
         i_t = df_input["day_index"].iloc[t] 
         model.addConstr(delta[t] == sigma[i_t])
-        for t in range(T):
-            if t == 0:  
-                model.addConstr(q[t] == z[t, 0])
-            else:  
-                model.addConstr(q[t] == z[t, 0] + quicksum(z[t, u] * D[u] for u in Upsilon[t])) 
-              
+
+        # アフィン関数
+        if t == 0:  
+            model.addConstr(q[t] == z[t, 0])
+        else:  
+            model.addConstr(q[t] == z[t, 0] + quicksum(z[t, u] * D[u] for u in Upsilon[t])) 
+        
+        # 補助変数
         for u in Upsilon[t]:
             if t == 0:  
                 model.addConstr(v[t, u] == 0)
@@ -93,12 +95,12 @@ def adaptive_model(df_input):
         'Order Quantity': q_values,
         'y_Cost' : y_values,
         'Inventory': inventory,
-        'Shortage': out_of_stock,
+        'out_of_stock': out_of_stock,
         'delta': delta_values,
         'sigma' : sigma_values,
         'Delivery Cost': delivery_costs,
         'Inventory Cost': inventory_costs,
-        'Shortage Cost': out_of_stock_costs,
+        'out_of_stock Cost': out_of_stock_costs,
         'v_values': [str(v_values[t]) for t in range(T)],  
         'w_values': [str(w_values[t]) for t in range(T)],
         'z_values': [str(z_values[t]) for t in range(T)],
