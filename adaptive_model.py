@@ -31,40 +31,46 @@ def adaptive_model(df_input):
     
     #補助変数の定義
     z = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
+    z0 = model.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="z0") 
     v = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="v") 
     w = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="w") 
         
     model.update() 
-    model.setParam('TimeLimit', 60)  # 60秒でタイムリミット
+    # model.setParam('TimeLimit', 60)  # 60秒でタイムリミット
     
-    # 制約条件
-    for t in range(T):
-        model.addConstr(y[t] >= h * (quicksum(z[s, 0] for s in range(t+1)) - quicksum(D[u] * w[t, u] for u in Upsilon[t])))
-        model.addConstr(y[t] >= b * (quicksum(D[u] * w[t, u] for u in Upsilon[t])) - quicksum(z[s, 0] for s in range(t+1)))
-        model.addConstr(quicksum(z[s, 0] for s in range(t+1)) - quicksum(D[u] * w[t, u] for u in Upsilon[t]) <= Imax)
-        model.addConstr(z[t, 0] + quicksum(D[u] * v[t, u] for u in Upsilon[t]) >= 0)
-        model.addConstr(z[t, 0] + quicksum(D[u] * v[t, u] for u in Upsilon[t]) <= Qmax * delta[t])
-        i_t = df_input["day_index"].iloc[t] 
-        model.addConstr(delta[t] == sigma[i_t])
-
-        # アフィン関数
-        if t == 0:  
-            model.addConstr(q[t] == z[t, 0])
-        else:  
-            model.addConstr(q[t] == z[t, 0] + quicksum(z[t, u] * D[u] for u in Upsilon[t])) 
-        
-        # 補助変数
-        for u in Upsilon[t]:
-            if t == 0:  
-                model.addConstr(v[t, u] == 0)
-            else:
-                model.addConstr(v[t, u] == z[t, u])
-
-        for u in Upsilon[t]:
-            model.addConstr(w[t, u] == quicksum((1 if s == u else 0) - v[s, u] for s in range(t + 1)))
-        
     # 目的関数
     model.setObjective(quicksum(y[t] + pi * delta[t] for t in range(T)), GRB.MINIMIZE) 
+
+    # 制約条件
+    for t in range(T):
+        model.addQConstr(y[t] >= h * (quicksum(z0[s] for s in range(t+1)) - quicksum(D[i] * w[t, i] for i in range(T))))
+        model.addQConstr(y[t] >= b * (quicksum(D[i] * w[t, i] for i in range(T)) - quicksum(z0[s] for s in range(t+1))))
+        model.addQConstr(quicksum(z0[s] for s in range(t+1)) - quicksum(D[u] * w[t, u] for u in range(T)) <= Imax)
+        model.addQConstr(z0[t] + quicksum(D[i] * v[t, i] for i in range(T)) >= 0)
+        model.addQConstr(z0[t] + quicksum(D[i] * v[t, i] for i in range(T)) <= Qmax * delta[t])
+        i_t = df_input["day_index"].iloc[t] 
+        model.addQConstr(delta[t] == sigma[i_t])
+
+        # アフィン関数
+    for t in range(T):
+        if t == 0:  
+            model.addConstr(q[t] == z0[t])
+        else:  
+            model.addConstr(q[t] == z0[t] + quicksum(z[t, u] * D[u] for u in range(t))) 
+        
+        # 補助変数
+    for t in range(T):
+        for u in range(T):
+            if t == 0:  
+                model.addConstr(v[t, u] == 0)
+            elif u < t:
+                model.addConstr(v[t, u] == z[t, u])
+            else:
+                model.addConstr(v[t, u] == 0)
+    for t in range(T):
+        for u in range(t):
+            model.addConstr(w[t, u] == quicksum((1 if s == u else 0) - v[s, u] for s in range(t + 1)))
+        
     model.optimize() 
     
     # 結果の出力
@@ -72,14 +78,15 @@ def adaptive_model(df_input):
     y_values = [y[t].X for t in range(T)] 
     delta_values = [delta[t].X for t in range(T)] 
     sigma_values = [sigma[df_input["day_index"].iloc[t]].X for t in range(T)] 
-    inventory = [max(0, sum(q[s].X - D[s] for s in range(t+1))) for t in range(T)]
-    out_of_stock = [max(0, sum(D[s] - q[s].X for s in range(t+1))) for t in range(T)]
+    inventory = [max(0, sum(z0[s].X for s in range(t+1)) - sum(D[i] * w[t, i].X for i in range(T)))for t in range(T)]
+    out_of_stock = [max(0, sum(D[i] * w[t, i].X for i in range(T)))for t in range(T) - sum(z0[s].X for s in range(t+1))]
     delivery_costs = [pi * delta[t].X for t in range(T)] 
     inventory_costs = [h * inventory[t] for t in range(T)] 
     out_of_stock_costs = [b * out_of_stock[t] for t in range(T)] 
-    v_values = [[v[t, u].X for u in Upsilon[t]] for t in range(T)]
-    w_values = [[v[t, u].X for u in Upsilon[t]] for t in range(T)]  
-    z_values = [[z[t, u].X for u in Upsilon[t]] for t in range(T)] 
+    v_values = [[v[t, u].X for u in range(T)] for t in range(T)]
+    w_values = [[v[t, u].X for u in range(T)] for t in range(T)] 
+    z0_values = [z0[t].X for t in range(T)]  
+    z_values = [[z[t, u].X for u in range(T)] for t in range(T)] 
     
     """"
     for i in range(W):
@@ -103,6 +110,7 @@ def adaptive_model(df_input):
         'out_of_stock Cost': out_of_stock_costs,
         'v_values': [str(v_values[t]) for t in range(T)],  
         'w_values': [str(w_values[t]) for t in range(T)],
+        'z0_values':z0_values,
         'z_values': [str(z_values[t]) for t in range(T)],
     })
 
