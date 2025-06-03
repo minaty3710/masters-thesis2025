@@ -13,7 +13,8 @@ def adaptive_model(df_input):
     
     #パラメータ設定
     D = df_input['demand'].tolist()                                            # 期𝑡の需要量 
-    T = len(D)                                                                 # 全期間
+    #T = len(D) 
+    T = 7                                                                      # 全期間
     Imax = 1500                                                                # 店舗の在庫上限
     Qmax = 500                                                                 # 配送容量上限
     pi = 1000                                                                  # 一日あたりの配送単価
@@ -93,9 +94,9 @@ def adaptive_model(df_input):
     date_list = df_input['date'].tolist()
     weekday_list = df_input['date'].dt.strftime('%a').tolist()       
     df_results = pd.DataFrame({
-        'Date': date_list,  
-        'week_day': weekday_list,
-        'Demand': D,
+        'Date': date_list[:T],  
+        'week_day': weekday_list[:T],
+        'Demand': D[:T],
         'Order Quantity': q_values,
         'y_Cost' : y_values,
         'Inventory': inventory,
@@ -150,7 +151,7 @@ df_input["day_index"] = df_input["date"].dt.weekday
 # training_data/test_data にもこの列を継承
 training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 3)].copy() 
-df_results = adaptive_model(training_data)
+df_results = adaptive_model(test_data )
 
 plot_order_quantity(df_results)
 export_results_to_csv(df_results)

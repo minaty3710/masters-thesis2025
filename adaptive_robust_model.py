@@ -9,7 +9,7 @@ from gurobipy import Model, GRB, quicksum
 
 def generate_sample_dataset(data):
     # 月曜日始まりの 7日間の連続需要データを取得する
-    sample_weeks = 5
+    sample_weeks = 7
     seed = None
     if seed is not None:
         np.random.seed(seed)
