@@ -65,7 +65,8 @@ def adaptive_model(df_input,R, d_bar):
     
     #パラメータ定義
     D = df_input['demand'].tolist()                                            # 期𝑡の需要量 
-    T = len(D)                                                                 # 全期間
+    #T = len(D)                                                                # 全期間
+    T = 7
     Imax = 1500                                                                # 店舗の在庫上限
     Qmax = 500                                                                 # 配送容量上限
     pi = 1000                                                                  # 一日あたりの配送単価
@@ -83,7 +84,8 @@ def adaptive_model(df_input,R, d_bar):
     z = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
     v = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="v") 
     w = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="w")
-    norm_Rtw = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="norm_Rtw")
+    norm_Rv= model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="norm_Rv")
+    norm_Rw= model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="norm_Rw")
         
     model.update() 
 
@@ -114,30 +116,18 @@ def adaptive_model(df_input,R, d_bar):
 
     # 制約条件
     for t in range(T):
-        dbar_v = quicksum(d_bar[day_of(u)] * v[t, u] for u in range(T))
-        dbar_w = quicksum(d_bar[day_of(u)] * w[t, u] for u in range(T))
-        
-        Rtw_components = []
-        for u in range(T):
-            ru = 0
-            day_u = day_of(u)
-            for j in range(7):
-                # w[t,s] のうち曜日jのsを合計
-                w_sum_j = quicksum(w[t, s] for s in range(T) if day_of(s) == j)
-                ru += R[j, day_u] * w_sum_j
-            Rtw_components.append(ru)
-        model.addQConstr(norm_Rtw[t] * norm_Rtw[t] == quicksum(Rtw_components[u] * Rtw_components[u] for u in range(T)))
+        model.addQConstr(norm_Rv[t] ** 2 >= quicksum((R[u, t] * v[t, u]) ** 2 for u in range(T)))
+        model.addQConstr(norm_Rw[t] ** 2 >= quicksum((R[u, t] * w[t, u]) ** 2 for u in range(T)))
 
-        model.addConstr(y[t] >= h * (quicksum(z0[s] for s in range(t + 1)) - dbar_w + norm_Rtw[t]))
-        model.addConstr(y[t] >= b * (dbar_w - quicksum(z0[s] for s in range(t + 1)) + norm_Rtw[t]))               
-        model.addConstr(quicksum(z0[u] for u in range(t + 1)) - dbar_w + norm_Rtw[t] <= Imax)
-        model.addConstr(z0[t] + dbar_v - norm_Rtw[t] >= 0)
-        model.addConstr(z0[t] + dbar_v + norm_Rtw[t] <= delta[t] * Qmax) 
+        model.addConstr(y[t] >= h * (quicksum(z0[s] for s in range(t + 1)) - quicksum(d_bar[u] * w[t, u] for  u in range(T)) + norm_Rw[t]))
+        model.addConstr(y[t] >= b * (quicksum(d_bar[u] * w[t, u] for  u in range(T)) - quicksum(z0[s] for s in range(t + 1)) + norm_Rw[t]))            
+        model.addConstr(quicksum(z0[s] for s in range(t + 1)) - quicksum(d_bar[u] * w[t, u] for  u in range(T)) + norm_Rw[t] <= Imax)
+        model.addConstr(z0[t] + quicksum(d_bar[u] * v[t, u] for  u in range(T)) - norm_Rv[t] >= 0)
+        model.addConstr(z0[t] + quicksum(d_bar[u] * v[t, u] for  u in range(T)) + norm_Rv[t] <= delta[t] * Qmax) 
         model.addConstr(delta[t] == sigma[day_of(t)])
 
     # 目的関数
     model.setObjective(quicksum(y[t] + pi * delta[t] for t in range(T)), GRB.MINIMIZE) 
-    model.Params.NonConvex = 2
     model.optimize() 
     
     # 結果の出力
@@ -165,9 +155,9 @@ def adaptive_model(df_input,R, d_bar):
     date_list = df_input['date'].tolist()
     weekday_list = df_input['date'].dt.strftime('%a').tolist()       
     df_results = pd.DataFrame({
-        'Date': date_list,  
-        'week_day': weekday_list,
-        'Demand': D,
+        'Date': date_list[:T],  
+        'week_day': weekday_list[:T],
+        'Demand': D[:T],
         'Order Quantity': q_values,
         'y_Cost' : y_values,
         'Inventory': inventory,
