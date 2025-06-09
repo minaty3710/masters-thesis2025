@@ -4,6 +4,7 @@ import os
 import numpy as np
 import cvxpy as cp
 
+from tqdm import tqdm
 from datetime import datetime
 from gurobipy import Model, GRB, quicksum
 
@@ -221,19 +222,15 @@ test_data = df_input[(df_input["date"].dt.year == 2025)].copy()
 
 # 実験設定
 sample_sizes = list(range(5, 31))
-n_trials = 5
+n_trials = 1
 all_results = []
 
-for n_samples in sample_sizes:
-    for trial in range(n_trials):
-        print(f"Running experiment: n_samples = {n_samples}, trial = {trial}")
-        seed = trial  
-        # サンプル生成（seed付きでgenerate_sample_datasetに渡すよう関数側を修正）
-        demand_samples = generate_sample_dataset(training_data, n_samples=n_samples, seed=seed)
-        
+for n_samples in tqdm(sample_sizes, desc="サンプル数", position=0):
+    for trial in tqdm(range(1, 1 + n_trials), desc=f"{n_samples}件目", position=1, leave=False):
+        #サンプル生成
+        demand_samples = generate_sample_dataset(training_data, n_samples=n_samples, seed=trial)
         # 楕円体生成
-        R, d_bar = minimum_volume_enclosing_ellipsoid(demand_samples)
-        
+        R, d_bar = minimum_volume_enclosing_ellipsoid(demand_samples)        
         # モデル実行
         df_results = adaptive_model(test_data, R, d_bar)
 
@@ -258,9 +255,14 @@ df_summary = pd.DataFrame(all_results)
 df_avg = df_summary.groupby("n_samples").mean().reset_index()
 
 # CSV出力
-df_avg.to_csv("experiment_results_summary.csv", index=False)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+filename = f'experiment_result_{timestamp}.csv'
+save_path = os.path.join("C:/Users/mina1/.spyder-py3/master's thesis/result", filename)
+df_avg.to_csv(save_path, index=False)
 
 # グラフ描画
+filename_graph = f'experiment_result_{timestamp}.png'
+save_path_graph = os.path.join("C:/Users/mina1/.spyder-py3/master's thesis/result", filename_graph)
 plt.figure(figsize=(10, 6))
 plt.plot(df_avg["n_samples"], df_avg["inventory_cost"], label="Inventory Cost")
 plt.plot(df_avg["n_samples"], df_avg["out_of_stock_cost"], label="Out of Stock Cost")
@@ -268,9 +270,9 @@ plt.plot(df_avg["n_samples"], df_avg["delivery_cost"], label="Delivery Cost")
 plt.plot(df_avg["n_samples"], df_avg["total_cost"], label="Total Cost", linewidth=2, linestyle='--')
 plt.xlabel("Number of Samples")
 plt.ylabel("Cost")
-plt.title("Cost vs. Number of Samples (Averaged over 5 trials)")
+plt.title("Cost vs. Number of Samples")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
-plt.savefig("cost_vs_samples.png")
+plt.savefig(save_path_graph, dpi=300)
 plt.show()
