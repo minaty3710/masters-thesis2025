@@ -2,23 +2,75 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import numpy as np
+import cvxpy as cp
 
 from datetime import datetime
 from gurobipy import Model, GRB, quicksum
 
+def generate_sample_dataset(data):
+    # 月曜日始まりの 7日間の連続需要データを取得する
+    sample_weeks = 7
+    seed = None
+    if seed is not None:
+        np.random.seed(seed)
+    
+    weekly_samples = []
+    monday_indices = data.index[data["day_index"] == 0].tolist()
+    
+    # 各月曜日について、7日分のデータが連続で取れるか確認
+    valid_starts = []
+    for idx in monday_indices:
+        if idx + 6 < len(data):
+            # 曜日が連続しているか（日付も連続しているか確認）
+            start_date = data.loc[idx, "date"]
+            end_date = data.loc[idx + 6, "date"]
+            if (end_date - start_date).days == 6:
+                valid_starts.append(idx)
+    
+    # ランダムに週を選ぶ（重複なし）
+    selected_starts = np.random.choice(valid_starts, size=sample_weeks, replace=False)
+    
+    for start_idx in selected_starts:
+        week_demand = data.loc[start_idx:start_idx+6, "demand"].values
+        weekly_samples.append(week_demand)
 
-def adaptive_model(df_input):   
+    return np.array(weekly_samples)
+def minimum_volume_enclosing_ellipsoid(samples):
+    N, T = samples.shape
+
+    # 変数の定義
+    P   = cp.Variable((T, T), PSD=True) 
+    rho = cp.Variable(T)
+
+    # 制約
+    constraints = [cp.norm(P @ samples[i] + rho, 2) <= 1 for i in range(N)]
+
+    # 目的関数
+    objective = cp.Minimize(-cp.log_det(P))
+
+    # 最適化
+    prob = cp.Problem(objective, constraints)
+    prob.solve(solver="SCS")
+
+    if prob.status not in ["optimal", "optimal_inaccurate"]:
+        raise RuntimeError(f"Solver failed: {prob.status}")
+
+    R       = np.linalg.inv(P.value)
+    d_bar   = - R @ rho.value
+
+    return R, d_bar
+def adaptive_model(df_input,R, d_bar):   
     # Gurobi モデル
     model = Model()
     
-    #パラメータ設定
+    #パラメータ定義
     D = df_input['demand'].tolist()                                            # 期𝑡の需要量 
     T = len(D)                                                                 # 全期間
     Imax = 1500                                                                # 店舗の在庫上限
     Qmax = 500                                                                 # 配送容量上限
     pi = 1000                                                                  # 一日あたりの配送単価
     h = 5                                                                      # 在庫単価
-    b = 20                                                                    # 欠品単価
+    b = 20                                                                     # 欠品単価
     
     # 決定変数の定義
     q = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="q")                 # 期𝑡の発注量
@@ -27,14 +79,19 @@ def adaptive_model(df_input):
     sigma = model.addVars(T, vtype=GRB.BINARY, name="sigma")                   # 各曜日の配送有無（1の曜日は配送可能）
     
     #補助変数の定義  
-    z0 = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
+    z0 = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="z0") 
     z = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
     v = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="v") 
-    w = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="w") 
+    w = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="w")
+    norm_Rv= model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="norm_Rv")
+    norm_Rw= model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="norm_Rw")
         
     model.update() 
-    #model.setParam('TimeLimit', 60)  # 60秒でタイムリミット
 
+    # 期ごとの曜日のindexを求める関数
+    def day_of(u):
+        return df_input["day_index"].iloc[u]
+    
     # アフィン関数
     for t in range(T):
         if t == 0: 
@@ -51,18 +108,29 @@ def adaptive_model(df_input):
                 model.addConstr(v[t, u] == z[t, u])
             else:
                 model.addConstr(v[t, u] == 0)
+
     for t in range(T):
         for u in range(T):
             model.addConstr(w[t, u] == quicksum((1 if s == u else 0) - v[s, u] for s in range(t + 1)))
 
     # 制約条件
     for t in range(T):
-        model.addConstr(y[t] >= h * (quicksum(z0[s] for s in range(t + 1)) - quicksum(D[i] * w[t, i] for i in range(T))))
-        model.addConstr(y[t] >= b * (quicksum(D[i] * w[t, i] for i in range(T)) - quicksum(z0[s] for s in range(t + 1))))                
-        model.addConstr(quicksum(z0[u] for u in range(t + 1)) - quicksum(D[i] * w[t, i] for i in range(T)) <= Imax)
-        model.addConstr(z0[t] + quicksum(v[t, u] * D[u] for u in range(t)) <= Qmax * delta[t])  
-        i_t = df_input["day_index"].iloc[t] 
-        model.addConstr(delta[t] == sigma[i_t]) 
+        i = day_of(t)         
+        model.addQConstr(norm_Rv[t] ** 2 >= quicksum((R[i, day_of(u)] * v[t, u]) ** 2 for u in range(T)))
+        model.addQConstr(norm_Rw[t] ** 2 >= quicksum((R[i, day_of(u)] * w[t, u]) ** 2 for u in range(T)))
+        # 累積需要・供給
+        demand_sum = quicksum(d_bar[day_of(u)] * w[t, u] for u in range(T))
+        supply_sum = quicksum(z0[s] for s in range(t + 1))
+        # 在庫コスト/欠品コスト
+        model.addConstr(y[t] >= h * (supply_sum - demand_sum + norm_Rw[t]))
+        model.addConstr(y[t] >= b * (demand_sum - supply_sum + norm_Rw[t]))
+        # (2.d)店舗在庫の容量制約       
+        model.addConstr(supply_sum - demand_sum + norm_Rw[t] <= Imax)
+        # (2.e)発注量の制約
+        model.addConstr(z0[t] + quicksum(d_bar[day_of(u)] * v[t, u] for u in range(T)) - norm_Rv[t] >= 0)
+        model.addConstr(z0[t] + quicksum(d_bar[day_of(u)] * v[t, u] for u in range(T)) + norm_Rv[t] <= delta[t] * Qmax)     
+        # 曜日の制約
+        model.addConstr(delta[t] == sigma[i])
 
     # 目的関数
     model.setObjective(quicksum(y[t] + pi * delta[t] for t in range(T)), GRB.MINIMIZE) 
@@ -82,6 +150,7 @@ def adaptive_model(df_input):
         max(0, sum(D[i] * w[t, i].X for i in range(T)) - sum(z0_values[s] for s in range(t + 1)))
         for t in range(T)
     ]
+    norm_Rw_values = [norm_Rw[t].X for t in range(T)] 
     delivery_costs = [pi * delta[t].X for t in range(T)] 
     inventory_costs = [h * inventory[t] for t in range(T)] 
     out_of_stock_costs = [b * out_of_stock[t] for t in range(T)] 
@@ -102,6 +171,7 @@ def adaptive_model(df_input):
         'out_of_stock': out_of_stock,
         'delta': delta_values,
         'sigma' : sigma_values,
+        'norm_Rw_values' : norm_Rw_values,
         'Delivery Cost': delivery_costs,
         'Inventory Cost': inventory_costs,
         'out_of_stock Cost': out_of_stock_costs,
@@ -112,7 +182,6 @@ def adaptive_model(df_input):
     })
 
     return  df_results 
-
 def plot_order_quantity(df_results):
     #リザルトデータの読み込み
     date_list = df_results['Date'].tolist() 
@@ -130,11 +199,10 @@ def plot_order_quantity(df_results):
     filename = f'order_quantity_{timestamp}.png'
     save_path = os.path.join("C:/Users/mina1/.spyder-py3/master's thesis/result", filename)
     plt.savefig(save_path, dpi=300)
-    plt.show()
-    
+    plt.show()  
 def export_results_to_csv(df_results):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = f'adaptive_optimization_result_{timestamp}.csv'
+    filename = f'robust_optimization_result_{timestamp}.csv'
     save_path = os.path.join("C:/Users/mina1/.spyder-py3/master's thesis/result", filename)
 
     # CSV 出力
@@ -150,7 +218,9 @@ df_input["day_index"] = df_input["date"].dt.weekday
 # training_data/test_data にもこの列を継承
 training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 3)].copy() 
-df_results = adaptive_model(test_data )
+demand_samples  = generate_sample_dataset(training_data)
+R, d_bar = minimum_volume_enclosing_ellipsoid(demand_samples)
+df_results = adaptive_model(test_data, R, d_bar)
 
 plot_order_quantity(df_results)
 export_results_to_csv(df_results)
