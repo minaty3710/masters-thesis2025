@@ -7,9 +7,8 @@ import cvxpy as cp
 from datetime import datetime
 from gurobipy import Model, GRB, quicksum
 
-def generate_sample_dataset(data):
+def generate_sample_dataset(data, n_samples=10, seed=None):
     # 月曜日始まりの 7日間の連続需要データを取得する
-    sample_weeks = 10
     seed = None
     if seed is not None:
         np.random.seed(seed)
@@ -28,7 +27,7 @@ def generate_sample_dataset(data):
                 valid_starts.append(idx)
     
     # ランダムに週を選ぶ（重複なし）
-    selected_starts = np.random.choice(valid_starts, size=sample_weeks, replace=False)
+    selected_starts = np.random.choice(valid_starts, size=n_samples, replace=False)
     
     for start_idx in selected_starts:
         week_demand = data.loc[start_idx:start_idx+6, "demand"].values
@@ -209,6 +208,7 @@ def export_results_to_csv(df_results):
     df_results.to_csv(save_path, index=False)
     print(f"結果を保存しました: {save_path}")
 
+
 read_path = "C:/Users/mina1/.spyder-py3/master's thesis/dataset/demand_data_2025-06-09_1643.csv"
 df_input = pd.read_csv(read_path) 
 # 日付が datetime 型でなければ変換
@@ -218,9 +218,59 @@ df_input["day_index"] = df_input["date"].dt.weekday
 # training_data/test_data にもこの列を継承
 training_data = df_input[(df_input["date"].dt.year == 2024)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025)].copy() 
-demand_samples  = generate_sample_dataset(training_data)
-R, d_bar = minimum_volume_enclosing_ellipsoid(demand_samples)
-df_results = adaptive_model(test_data, R, d_bar)
 
-#plot_order_quantity(df_results)
-#export_results_to_csv(df_results)
+# 実験設定
+sample_sizes = list(range(5, 31))
+n_trials = 5
+all_results = []
+
+for n_samples in sample_sizes:
+    for trial in range(n_trials):
+        print(f"Running experiment: n_samples = {n_samples}, trial = {trial}")
+        seed = trial  
+        # サンプル生成（seed付きでgenerate_sample_datasetに渡すよう関数側を修正）
+        demand_samples = generate_sample_dataset(training_data, n_samples=n_samples, seed=seed)
+        
+        # 楕円体生成
+        R, d_bar = minimum_volume_enclosing_ellipsoid(demand_samples)
+        
+        # モデル実行
+        df_results = adaptive_model(test_data, R, d_bar)
+
+        # コスト集計
+        total_inventory_cost = df_results["Inventory Cost"].sum()
+        total_out_of_stock_cost = df_results["out_of_stock Cost"].sum()
+        total_delivery_cost = df_results["Delivery Cost"].sum()
+        total_cost = total_inventory_cost + total_out_of_stock_cost + total_delivery_cost
+
+        all_results.append({
+            "n_samples": n_samples,
+            "trial": trial,
+            "inventory_cost": total_inventory_cost,
+            "out_of_stock_cost": total_out_of_stock_cost,
+            "delivery_cost": total_delivery_cost,
+            "total_cost": total_cost,
+        })
+
+df_summary = pd.DataFrame(all_results)
+
+# 平均をとる
+df_avg = df_summary.groupby("n_samples").mean().reset_index()
+
+# CSV出力
+df_avg.to_csv("experiment_results_summary.csv", index=False)
+
+# グラフ描画
+plt.figure(figsize=(10, 6))
+plt.plot(df_avg["n_samples"], df_avg["inventory_cost"], label="Inventory Cost")
+plt.plot(df_avg["n_samples"], df_avg["out_of_stock_cost"], label="Out of Stock Cost")
+plt.plot(df_avg["n_samples"], df_avg["delivery_cost"], label="Delivery Cost")
+plt.plot(df_avg["n_samples"], df_avg["total_cost"], label="Total Cost", linewidth=2, linestyle='--')
+plt.xlabel("Number of Samples")
+plt.ylabel("Cost")
+plt.title("Cost vs. Number of Samples (Averaged over 5 trials)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("cost_vs_samples.png")
+plt.show()

@@ -141,7 +141,7 @@ def export_results_to_csv(df_results):
     df_results.to_csv(save_path, index=False)
     print(f"結果を保存しました: {save_path}")
 
-read_path = "C:\\Users\mina1\.spyder-py3\master's thesis\dataset\demand_data_2025-04-22_1416.csv" 
+read_path = "C:/Users/mina1/.spyder-py3/master's thesis/dataset/demand_data_2025-06-09_1643.csv"
 df_input = pd.read_csv(read_path) 
 # 日付が datetime 型でなければ変換
 df_input["date"] = pd.to_datetime(df_input["date"]) 

@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-start_date = "2025-01-01"
-end_date = "2025-03-31"
+start_date = "2024-01-01"
+end_date = "2025-01-31"
 dates = pd.date_range(start = start_date, end = end_date, freq = "D")
 
 mu = {
@@ -39,4 +39,5 @@ timestamp = now.strftime('%Y-%m-%d_%H%M')
 filename = f'demand_data_{timestamp}.csv'
 save_path = f"C:\\Users\mina1\.spyder-py3\master's thesis\dataset\{filename}"
 df.to_csv(save_path, index = False)
+print(save_path)
 

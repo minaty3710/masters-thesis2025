@@ -103,29 +103,29 @@ def plot_order_quantity(df_results):
     plt.legend()
     plt.tight_layout()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = f'order_quantity_{timestamp}.png'
+    filename = f'baseline_model_result_{timestamp}.png'
     save_path = os.path.join("C:/Users/mina1/.spyder-py3/master's thesis/result", filename)
     plt.savefig(save_path, dpi=300)
     plt.show()
     
 def export_results_to_csv(df_results):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = f'optimization_result_{timestamp}.csv'
+    filename = f'baseline_model_result_{timestamp}.csv'
     save_path = os.path.join("C:/Users/mina1/.spyder-py3/master's thesis/result", filename)
 
     # CSV 出力
     df_results.to_csv(save_path, index=False)
     print(f"結果を保存しました: {save_path}")
 
-read_path = "C:\\Users\mina1\.spyder-py3\master's thesis\dataset\demand_data_2025-04-22_1416.csv" 
+read_path = "C:/Users/mina1/.spyder-py3/master's thesis/dataset/demand_data_2025-06-09_1643.csv"
 df_input = pd.read_csv(read_path) 
 # 日付が datetime 型でなければ変換
 df_input["date"] = pd.to_datetime(df_input["date"]) 
 # 月曜日を0とした曜日インデックスを列に追加
 df_input["day_index"] = df_input["date"].dt.weekday 
 # training_data/test_data にもこの列を継承
-training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
-test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 3)].copy() 
-df_results = baseline_model(training_data)  
+#training_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month <= 2)].copy() 
+test_data = df_input[(df_input["date"].dt.year == 2025) & (df_input["date"].dt.month >= 1)].copy() 
+df_results = baseline_model(test_data)  
 plot_order_quantity(df_results)
 export_results_to_csv(df_results)
