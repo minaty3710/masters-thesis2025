@@ -10,7 +10,6 @@ from gurobipy import Model, GRB, quicksum
 
 def generate_sample_dataset(data, n_samples=10, seed=None):
     # 月曜日始まりの 7日間の連続需要データを取得する
-    seed = None
     if seed is not None:
         np.random.seed(seed)
     
@@ -222,7 +221,7 @@ test_data = df_input[(df_input["date"].dt.year == 2025)].copy()
 
 # 実験設定
 sample_sizes = list(range(5, 31))
-n_trials = 1
+n_trials = 5
 all_results = []
 
 for n_samples in tqdm(sample_sizes, desc="サンプル数", position=0):
