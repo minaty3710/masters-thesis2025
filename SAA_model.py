@@ -35,30 +35,6 @@ def generate_sample_dataset(data):
         weekly_samples.append(week_demand)
 
     return np.array(weekly_samples)
-def minimum_volume_enclosing_ellipsoid(samples):
-    N, T = samples.shape
-
-    # 変数の定義
-    P   = cp.Variable((T, T), PSD=True) 
-    rho = cp.Variable(T)
-
-    # 制約
-    constraints = [cp.norm(P @ samples[i] + rho, 2) <= 1 for i in range(N)]
-
-    # 目的関数
-    objective = cp.Minimize(-cp.log_det(P))
-
-    # 最適化
-    prob = cp.Problem(objective, constraints)
-    prob.solve(solver="SCS")
-
-    if prob.status not in ["optimal", "optimal_inaccurate"]:
-        raise RuntimeError(f"Solver failed: {prob.status}")
-
-    R       = np.linalg.inv(P.value)
-    d_bar   = - R @ rho.value
-
-    return R, d_bar
 def convert_samples_to_dataframe(demand_samples, reference_data):
     result = []
 
@@ -81,7 +57,7 @@ def convert_samples_to_dataframe(demand_samples, reference_data):
 
     df = pd.DataFrame(result)
     return df
-def pre_adaptive_model(df_input,R, d_bar):   
+def pre_sample_average_approximation_model(df_input):
     # Gurobi モデル
     model = Model()
     
@@ -99,14 +75,6 @@ def pre_adaptive_model(df_input,R, d_bar):
     y = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="y")                 # 期𝑡の在庫コスト（欠品コスト）  
     delta = model.addVars(T, vtype=GRB.BINARY, name="delta")                   # 配送有無（1のとき配送を実施）
     sigma = model.addVars(T, vtype=GRB.BINARY, name="sigma")                   # 各曜日の配送有無（1の曜日は配送可能）
-    
-    #補助変数の定義  
-    z0 = model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="z0") 
-    z = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="z") 
-    v = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="v") 
-    w = model.addVars(T, T, vtype=GRB.CONTINUOUS, lb=0, name="w")
-    norm_Rv= model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="norm_Rv")
-    norm_Rw= model.addVars(T, vtype=GRB.CONTINUOUS, lb=0, name="norm_Rw")
         
     model.update() 
 
@@ -160,8 +128,8 @@ def pre_adaptive_model(df_input,R, d_bar):
     
     # 結果の出力
     delivery_schedule = [int(round(sigma[i].X)) for i in range(7)]
-    return delivery_schedule
-def adaptive_model(df_input,R, d_bar, delivery_schedule):   
+    return delivery_schedule  
+def sample_average_approximation_model(df_input,delivery_schedule):
     # Gurobi モデル
     model = Model()
     
@@ -321,10 +289,10 @@ df_input["day_index"] = df_input["date"].dt.weekday
 training_data = df_input[(df_input["date"].dt.year == 2024)].copy() 
 test_data = df_input[(df_input["date"].dt.year == 2025)].copy() 
 demand_samples  = generate_sample_dataset(training_data)
-R, d_bar = minimum_volume_enclosing_ellipsoid(demand_samples)
 df_samples = convert_samples_to_dataframe(demand_samples, training_data)
-delivery_schedule = pre_adaptive_model(df_samples, R, d_bar)
+delivery_schedule = pre_sample_average_approximation_model(df_samples)
 print(delivery_schedule)
-df_results = adaptive_model(test_data, R, d_bar, delivery_schedule)
-plot_order_quantity(df_results)
-export_results_to_csv(df_results)
+df_results = sample_average_approximation_model(test_data, delivery_schedule)
+
+#plot_order_quantity(df_results)
+#export_results_to_csv(df_results)
